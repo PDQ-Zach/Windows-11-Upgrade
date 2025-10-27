@@ -1,0 +1,29 @@
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs and temp
+*.log
+*.tmp
+*.bak
+*.old
+
+# Archives
+*.zip
+*.7z
+*.tar.gz
+
+# Visual Studio Code
+.vscode/
+
+# Node
+node_modules/
+
+# PowerShell specific
+# Don't commit local temp logs or user-specific state
+C:\temp\winupgradelogs/
+*.ps1xml
+
+# macOS
+*.DS_Store

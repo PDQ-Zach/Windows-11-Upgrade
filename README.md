@@ -7,6 +7,7 @@ This repo was created from an existing local copy of `Win11Upgrade.ps1`.
 ## Contents
 
 - `Win11Upgrade.ps1` — main upgrade script
+- `Win11Cleanup.ps1` — post-upgrade cleanup script
 - `LICENSE` — MIT License
 - `.gitignore` — common ignores for PowerShell/Windows/macOS
 
@@ -23,6 +24,22 @@ This repo was created from an existing local copy of `Win11Upgrade.ps1`.
    ```
 
 3. Check logs under `C:\temp\winupgradelogs` (or the fallback path) for detailed output.
+
+## Post-upgrade cleanup
+
+After the machine has rebooted into Windows 11, run `Win11Cleanup.ps1` elevated:
+
+```powershell
+.\Win11Cleanup.ps1 -DryRun   # preview what would be removed
+.\Win11Cleanup.ps1           # remove the working folder and setup staging folders
+```
+
+It refuses to run unless the machine is on Windows 11 (build 22000+), so a failed upgrade keeps its files for a retry (`-Force` overrides this). Opt-in switches:
+
+- `-RemoveWindowsOld` — also delete `C:\Windows.old` (disables rollback; Windows removes it on its own after about 10 days)
+- `-RemoveSetupLogs` — also delete the copied setup logs in `C:\Temp\Logs\WinSetup`
+
+Exit codes: `0` success, `1` error or not on Windows 11, `2` some items could not be removed. Logs go to `C:\temp\winupgradelogs`.
 
 ## Notes
 

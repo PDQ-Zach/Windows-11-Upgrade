@@ -31,7 +31,8 @@ function Write-Log {
 	)
 	$timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
 	$line = "[$timestamp] [$Level] $Message"
-	Write-Output $line
+	# Write-Host, not Write-Output: Write-Log is called inside functions whose return value is used
+	Write-Host $line
 	try {
 		# If LogFile is not set, create a fallback in the user's TEMP directory so we can always log
 		if (-not $Global:LogFile) {
@@ -83,14 +84,21 @@ function Get-OSVersionInfo {
 
 function Test-TPM {
 	try {
+		$present = $false
+		$ready = $false
+		$specVersion = $null
 		if (Get-Command -Name Get-Tpm -ErrorAction SilentlyContinue) {
 			$tpm = Get-Tpm
-			return @{ Present = $tpm.TpmPresent; Ready = $tpm.TpmReady; SpecVersion = $tpm.SpecVersion }
-		} else {
-			# Fallback to WMI namespace (older systems may not have Get-Tpm)
-			$wmi = Get-WmiObject -Namespace 'Root\\CIMv2\\Security\\MicrosoftTpm' -Class Win32_Tpm -ErrorAction Stop
-			return @{ Present = $true; Ready = $wmi.IsActivated_InitialValue -eq $true; SpecVersion = $wmi.SpecVersion }
+			$present = [bool]$tpm.TpmPresent
+			$ready = [bool]$tpm.TpmReady
 		}
+		# SpecVersion (e.g. "2.0, 0, 1.38") is only exposed by Win32_Tpm, not by Get-Tpm
+		$wmi = Get-CimInstance -Namespace 'root\cimv2\security\microsofttpm' -ClassName Win32_Tpm -ErrorAction SilentlyContinue
+		if ($wmi) {
+			$specVersion = $wmi.SpecVersion
+			if (-not $present) { $present = $true; $ready = ($wmi.IsActivated_InitialValue -eq $true) }
+		}
+		return @{ Present = $present; Ready = $ready; SpecVersion = $specVersion }
 	} catch {
 		Write-Log "TPM check failed or TPM not present: $_" "WARN"
 		return @{ Present = $false; Ready = $false; SpecVersion = $null }
@@ -113,7 +121,7 @@ function Test-SecureBoot {
 }
 
 # Log OS / TPM / Secure Boot state and return a list of blocking problems (empty list = OK).
-# TPM must be present, ready and version 2.0; Secure Boot must be enabled.
+# TPM must be present and version 2.0 (not-ready is only a warning); Secure Boot must be enabled.
 function Test-HardwareRequirements {
 	$problems = @()
 
@@ -124,11 +132,13 @@ function Test-HardwareRequirements {
 	Write-Log "TPM present: $($tpmInfo.Present); Ready: $($tpmInfo.Ready); SpecVersion: $($tpmInfo.SpecVersion)"
 	if (-not $tpmInfo.Present) {
 		$problems += "TPM not present"
-	} elseif (-not $tpmInfo.Ready) {
-		$problems += "TPM present but not ready"
-	}
-	if ($tpmInfo.Present -and ($tpmInfo.SpecVersion -notmatch '^\s*2\.0')) {
-		$problems += "TPM 2.0 required (found spec version '$($tpmInfo.SpecVersion)')"
+	} else {
+		if ($tpmInfo.SpecVersion -notmatch '^\s*2\.0') {
+			$problems += "TPM 2.0 required (found spec version '$($tpmInfo.SpecVersion)')"
+		}
+		if (-not $tpmInfo.Ready) {
+			Write-Log "TPM is present but not reported as ready; setup may still proceed." "WARN"
+		}
 	}
 
 	$secureBoot = Test-SecureBoot

@@ -33,7 +33,8 @@ function Write-Log {
 	)
 	$timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
 	$line = "[$timestamp] [$Level] $Message"
-	Write-Output $line
+	# Write-Host, not Write-Output: Write-Log is called inside functions whose return value is used
+	Write-Host $line
 	try {
 		Add-Content -Path $Global:LogFile -Value $line -ErrorAction Stop
 	} catch {

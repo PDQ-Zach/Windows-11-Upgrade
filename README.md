@@ -8,6 +8,7 @@ This repo was created from an existing local copy of `Win11Upgrade.ps1`.
 
 - `Win11Upgrade.ps1` — main upgrade script
 - `Win11Cleanup.ps1` — post-upgrade cleanup script
+- `PDQ-Connect-Guide.md` — step-by-step guide to building the upgrade and cleanup packages in PDQ Connect
 - `LICENSE` — MIT License
 - `.gitignore` — common ignores for PowerShell/Windows/macOS
 

@@ -18,8 +18,8 @@
 #>
 
 param(
-	[string]$WorkDir = "C:\\win_11_upgrade\", # Working directory used by Win11Upgrade.ps1
-	[string]$SetupLogsDir = "C:\\Temp\\Logs\\WinSetup", # Directory passed to setup.exe /copylogs
+	[string]$WorkDir = "C:\win_11_upgrade\", # Working directory used by Win11Upgrade.ps1
+	[string]$SetupLogsDir = "C:\Temp\Logs\WinSetup", # Directory passed to setup.exe /copylogs
 	[switch]$RemoveWindowsOld = $false, # If true, also delete Windows.old (no rollback afterwards)
 	[switch]$RemoveSetupLogs = $false,  # If true, also delete the copied setup logs
 	[switch]$Force = $false,            # If true, clean up even if the OS is not Windows 11
@@ -67,6 +67,31 @@ function Get-FreeBytes {
 	}
 }
 
+# Refuse to delete a drive root, a core system folder, or anything inside the Windows or
+# Program Files folders. Guards against a bad -WorkDir / -SetupLogsDir value.
+function Test-SafeToRemove {
+	param([string]$Path)
+	try {
+		$full = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+	} catch {
+		return $false
+	}
+	if ($full -ieq [System.IO.Path]::GetPathRoot($full).TrimEnd('\')) { return $false }
+
+	$systemDrive = $env:SystemDrive
+	$exactOnly = @("$systemDrive\Users", "$systemDrive\Temp", $env:ProgramData)
+	$noChildren = @($env:SystemRoot, $env:ProgramFiles, ${env:ProgramFiles(x86)})
+	foreach ($p in $exactOnly) {
+		if ($p -and $full -ieq $p.TrimEnd('\')) { return $false }
+	}
+	foreach ($p in $noChildren) {
+		if (-not $p) { continue }
+		$p = $p.TrimEnd('\')
+		if ($full -ieq $p -or $full.StartsWith("$p\", [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+	}
+	return $true
+}
+
 # Remove a folder, taking ownership first when the normal delete fails (Windows.old and
 # the setup staging folders are owned by SYSTEM / TrustedInstaller).
 function Remove-Folder {
@@ -74,6 +99,10 @@ function Remove-Folder {
 		[string]$Path,
 		[switch]$TakeOwnership
 	)
+	if (-not (Test-SafeToRemove -Path $Path)) {
+		Write-Log "Refusing to remove protected path: $Path" "ERROR"
+		return $false
+	}
 	if (-not (Test-Path -LiteralPath $Path)) {
 		Write-Log "Not present, skipping: $Path"
 		return $true
@@ -98,7 +127,7 @@ function Remove-Folder {
 }
 
 # --- Start script ---
-$Global:LogDir = 'C:\\temp\\winupgradelogs'
+$Global:LogDir = 'C:\temp\winupgradelogs'
 New-Item -Path $Global:LogDir -ItemType Directory -Force | Out-Null
 $Global:LogFile = Join-Path -Path $Global:LogDir -ChildPath "Win11Cleanup_$(Get-Date -Format yyyyMMdd_HHmmss).log"
 

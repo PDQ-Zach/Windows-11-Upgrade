@@ -9,19 +9,22 @@
   - Script is executed on the target machine (not a remote copy step).
   - This script should be run elevated (it will check and fail early if not).
 
-  Changes added:
-  - Timestamped log file under %ProgramData%\Win11UpgradeLogs\
+  Features:
+  - Timestamped log file under C:\temp\winupgradelogs\
   - Verbose console output and log file writes
-  - Input validations (elevation, existence of ZIP, free disk space)
+  - Skips devices that are already on Windows 11
+  - Input validations (elevation, TPM 2.0, Secure Boot, existence of ZIP, free disk space)
+  - -DryRun validates everything (including the ZIP contents) without expanding or running setup
   - Try/Catch and exit codes for common failure modes
   - Comments that explain the upgrade steps and common flags
 #>
 
 param(
 	[string]$ZipName = "setup.zip",    # Name of the ZIP file expected in the working dir
-	[string]$WorkDir = "C:\\win_11_upgrade\", # Working directory containing the ZIP
-	[switch]$DryRun = $false,           # If true, log actions but do not run setup
-	[switch]$SkipHardwareChecks = $false # If true, log TPM / Secure Boot problems but do not block the upgrade
+	[string]$WorkDir = "C:\win_11_upgrade\", # Working directory containing the ZIP
+	[switch]$DryRun = $false,           # If true, validate and log actions but do not expand the ZIP or run setup
+	[switch]$SkipHardwareChecks = $false, # If true, log TPM / Secure Boot problems but do not block the upgrade
+	[switch]$Force = $false             # If true, run even if the device is already on Windows 11
 )
 
 function Write-Log {
@@ -37,7 +40,7 @@ function Write-Log {
 		# If LogFile is not set, create a fallback in the user's TEMP directory so we can always log
 		if (-not $Global:LogFile) {
 			try {
-				if (-not $Global:LogDir) { $Global:LogDir = 'C:\\temp\\winupgradelogs' }
+				if (-not $Global:LogDir) { $Global:LogDir = 'C:\temp\winupgradelogs' }
 				New-Item -Path $Global:LogDir -ItemType Directory -Force | Out-Null
 				$Global:LogFile = Join-Path -Path $Global:LogDir -ChildPath "Win11Upgrade_fallback_$(Get-Date -Format yyyyMMdd_HHmmss).log"
 			} catch {
@@ -151,9 +154,8 @@ function Test-HardwareRequirements {
 }
 
 # --- Start script ---
-New-Item -Path $WorkDir -ItemType Directory -Force | Out-Null
 # Use the requested fixed log directory so logs are always placed at the same location
-$Global:LogDir = 'C:\\temp\\winupgradelogs'
+$Global:LogDir = 'C:\temp\winupgradelogs'
 New-Item -Path $Global:LogDir -ItemType Directory -Force | Out-Null
 $Global:LogFile = Join-Path -Path $Global:LogDir -ChildPath "Win11Upgrade_$(Get-Date -Format yyyyMMdd_HHmmss).log"
 
@@ -161,6 +163,13 @@ try {
 	Write-Log "Starting Windows 11 upgrade script"
 
 	Assert-Elevated
+
+	# Nothing to do on a device that is already on Windows 11 (build 22000 or newer)
+	$osInfo = Get-OSVersionInfo
+	if ($osInfo -and $osInfo.BuildNumber -ge 22000 -and -not $Force) {
+		Write-Log "Device is already on Windows 11 (build $($osInfo.BuildNumber)). Nothing to do (use -Force to run anyway)."
+		exit 0
+	}
 
 	# Run pre-upgrade hardware checks (OS build, TPM, Secure Boot) first so an ineligible
 	# device fails fast, before the ZIP is validated and expanded.
@@ -177,13 +186,8 @@ try {
 		}
 	}
 
-	# Validate working directory and ZIP
+	# Validate working directory and ZIP. The file copy step creates the working directory.
 	Write-Log "Using working directory: $WorkDir"
-	if (-not (Test-Path -Path $WorkDir)) {
-		Write-Log "Working directory $WorkDir does not exist. Creating..."
-		New-Item -Path $WorkDir -ItemType Directory -Force | Out-Null
-	}
-
 	$zipPath = Join-Path -Path $WorkDir -ChildPath $ZipName
 	if (-not (Test-Path -Path $zipPath)) {
 		Write-Log "Expected zip file not found: $zipPath" "ERROR"
@@ -197,22 +201,28 @@ try {
 		throw "InsufficientDiskSpace"
 	}
 
-	# Expand the archive - idempotent if destination already has files
-	Write-Log "Expanding archive $zipPath to $WorkDir"
+	# Confirm setup.exe is at the top level of the ZIP without expanding it. This catches a ZIP
+	# made from the containing folder (setup.exe one level down) before any extraction work.
 	try {
-		Expand-Archive -Path $zipPath -DestinationPath $WorkDir -Force -ErrorAction Stop
-		Write-Log "Archive expanded successfully"
+		Add-Type -AssemblyName System.IO.Compression.FileSystem
+		$zipArchive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+		try {
+			$zipHasSetup = [bool]($zipArchive.Entries | Where-Object { $_.FullName -ieq 'setup.exe' })
+		} finally {
+			$zipArchive.Dispose()
+		}
 	} catch {
-		Write-Log "Failed to expand archive: $_" "ERROR"
-		throw
+		Write-Log "Unable to read $zipPath as a ZIP archive: $_" "ERROR"
+		throw "ZipInvalid"
 	}
-
-	# Locate setup.exe - it should be in the working directory after expanding the ZIP
-	$setupExe = Join-Path -Path $WorkDir -ChildPath "setup.exe"
-	if (-not (Test-Path -Path $setupExe)) {
-		Write-Log "setup.exe not found in $WorkDir after expanding archive" "ERROR"
+	if (-not $zipHasSetup) {
+		Write-Log "setup.exe is not at the top level of $zipPath. Re-zip the files themselves, not the folder that contains them." "ERROR"
 		throw "SetupMissing"
 	}
+
+	$setupExe = Join-Path -Path $WorkDir -ChildPath "setup.exe"
+	$copyLogsPath = 'C:\Temp\Logs\WinSetup'
+	$arguments = "/auto Upgrade /migratedrivers all /EULA accept /ShowOOBE none /dynamicupdate disable /quiet /compat ignorewarning /copylogs `"$copyLogsPath`""
 
 	# Explain the flags used when launching setup.exe
 	Write-Log "Preparing to run setup.exe with silent upgrade flags"
@@ -233,16 +243,30 @@ try {
 	#   deployment. Consider running the Windows Upgrade Health checks or the Microsoft PC Health
 	#   Checkup tool prior to upgrade.
 
-	$copyLogsPath = "C:\\Temp\\Logs\\WinSetup"
-	New-Item -Path $copyLogsPath -ItemType Directory -Force | Out-Null
-
-	$arguments = "/auto Upgrade /migratedrivers all /EULA accept /ShowOOBE none /dynamicupdate disable /quiet /compat ignorewarning /copylogs `"$copyLogsPath`""
-
 	if ($DryRun) {
+		Write-Log "DryRun enabled - would expand $zipPath to $WorkDir"
 		Write-Log "DryRun enabled - would run: $setupExe $arguments"
 		Write-Log "Finished (dry run)."
 		exit 0
 	}
+
+	# Expand the archive - idempotent if destination already has files
+	Write-Log "Expanding archive $zipPath to $WorkDir"
+	try {
+		Expand-Archive -Path $zipPath -DestinationPath $WorkDir -Force -ErrorAction Stop
+		Write-Log "Archive expanded successfully"
+	} catch {
+		Write-Log "Failed to expand archive: $_" "ERROR"
+		throw
+	}
+
+	# Confirm setup.exe landed in the working directory after expanding the ZIP
+	if (-not (Test-Path -Path $setupExe)) {
+		Write-Log "setup.exe not found in $WorkDir after expanding archive" "ERROR"
+		throw "SetupMissing"
+	}
+
+	New-Item -Path $copyLogsPath -ItemType Directory -Force | Out-Null
 
 	# Start setup.exe and wait for completion. Capture exit code for reporting.
 	Write-Log "Launching setup.exe"
@@ -290,9 +314,11 @@ try {
 	$exitCode = $process.ExitCode
 	Write-Log "setup.exe exited with code $exitCode"
 
-	# Common exit codes can be documented or acted on. Here we treat 0 as success.
+	# Exit code 0 means setup accepted the job and handed off to the upgrade phases, not that
+	# Windows 11 is installed yet. The device reboots to finish; confirm the result afterwards
+	# (OS build 22000+ and the logs in the /copylogs folder and %windir%\Panther).
 	if ($exitCode -eq 0) {
-		Write-Log "Upgrade completed successfully."
+		Write-Log "setup.exe completed successfully. The upgrade continues after reboot; verify the OS build once the device is back up."
 		exit 0
 	} else {
 		Write-Log "Upgrade failed or requires attention. Exit code: $exitCode" "ERROR"

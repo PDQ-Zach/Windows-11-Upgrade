@@ -24,6 +24,8 @@ This repo was created from an existing local copy of `Win11Upgrade.ps1`.
    # Add -DryRun switch to validate steps without executing setup.exe
    ```
 
+   The script exits without doing anything on devices already on Windows 11 (add `-Force` to run anyway). `-DryRun` validates the hardware, ZIP contents and free space without expanding the ZIP or running setup.
+
    The script stops before launching setup if the TPM is missing, not ready or not 2.0, or if Secure Boot is not enabled. Add `-SkipHardwareChecks` to log those problems and continue anyway.
 
 3. Check logs under `C:\temp\winupgradelogs` (or the fallback path) for detailed output.

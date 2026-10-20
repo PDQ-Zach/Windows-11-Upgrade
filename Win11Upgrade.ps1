@@ -20,7 +20,8 @@
 param(
 	[string]$ZipName = "setup.zip",    # Name of the ZIP file expected in the working dir
 	[string]$WorkDir = "C:\\win_11_upgrade\", # Working directory containing the ZIP
-	[switch]$DryRun = $false            # If true, log actions but do not run setup
+	[switch]$DryRun = $false,           # If true, log actions but do not run setup
+	[switch]$SkipHardwareChecks = $false # If true, log TPM / Secure Boot problems but do not block the upgrade
 )
 
 function Write-Log {
@@ -111,6 +112,34 @@ function Test-SecureBoot {
 	}
 }
 
+# Log OS / TPM / Secure Boot state and return a list of blocking problems (empty list = OK).
+# TPM must be present, ready and version 2.0; Secure Boot must be enabled.
+function Test-HardwareRequirements {
+	$problems = @()
+
+	$osInfo = Get-OSVersionInfo
+	if ($osInfo) { Write-Log "OS: $($osInfo.Caption) Version $($osInfo.Version) Build $($osInfo.BuildNumber)" }
+
+	$tpmInfo = Test-TPM
+	Write-Log "TPM present: $($tpmInfo.Present); Ready: $($tpmInfo.Ready); SpecVersion: $($tpmInfo.SpecVersion)"
+	if (-not $tpmInfo.Present) {
+		$problems += "TPM not present"
+	} elseif (-not $tpmInfo.Ready) {
+		$problems += "TPM present but not ready"
+	}
+	if ($tpmInfo.Present -and ($tpmInfo.SpecVersion -notmatch '^\s*2\.0')) {
+		$problems += "TPM 2.0 required (found spec version '$($tpmInfo.SpecVersion)')"
+	}
+
+	$secureBoot = Test-SecureBoot
+	Write-Log "Secure Boot detected: $secureBoot"
+	if (-not $secureBoot) {
+		$problems += "Secure Boot is not enabled or could not be verified"
+	}
+
+	return $problems
+}
+
 # --- Start script ---
 New-Item -Path $WorkDir -ItemType Directory -Force | Out-Null
 # Use the requested fixed log directory so logs are always placed at the same location
@@ -184,6 +213,20 @@ try {
 
 	$arguments = "/auto Upgrade /migratedrivers all /EULA accept /ShowOOBE none /dynamicupdate disable /quiet /compat ignorewarning /copylogs `"$copyLogsPath`""
 
+	# Run pre-upgrade hardware checks: OS build, TPM, Secure Boot
+	$hardwareProblems = @(Test-HardwareRequirements)
+	if ($hardwareProblems.Count -gt 0) {
+		foreach ($problem in $hardwareProblems) { Write-Log "Hardware check failed: $problem" "ERROR" }
+		if ($SkipHardwareChecks) {
+			Write-Log "-SkipHardwareChecks set - continuing despite failed hardware checks." "WARN"
+		} elseif ($DryRun) {
+			Write-Log "DryRun enabled - the upgrade would be blocked by the failed hardware checks above." "WARN"
+		} else {
+			Write-Log "Device does not meet Windows 11 requirements. Use -SkipHardwareChecks to override." "ERROR"
+			throw "HardwareRequirementsNotMet"
+		}
+	}
+
 	if ($DryRun) {
 		Write-Log "DryRun enabled - would run: $setupExe $arguments"
 		Write-Log "Finished (dry run)."
@@ -192,14 +235,6 @@ try {
 
 	# Start setup.exe and wait for completion. Capture exit code for reporting.
 	Write-Log "Launching setup.exe"
-
-	# Run pre-upgrade compatibility checks: OS build, TPM, Secure Boot
-	$osInfo = Get-OSVersionInfo
-	if ($osInfo) { Write-Log "OS: $($osInfo.Caption) Version $($osInfo.Version) Build $($osInfo.BuildNumber)" }
-	$tpmInfo = Test-TPM
-	Write-Log "TPM present: $($tpmInfo.Present); Ready: $($tpmInfo.Ready); SpecVersion: $($tpmInfo.SpecVersion)"
-	$secureBoot = Test-SecureBoot
-	Write-Log "Secure Boot detected: $secureBoot"
 
 	$startInfo = New-Object System.Diagnostics.ProcessStartInfo
 	$startInfo.FileName = $setupExe

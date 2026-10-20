@@ -4,7 +4,7 @@ This guide walks through building two PDQ Connect packages: one that upgrades a 
 
 ## Before you start
 
-- Devices must meet Windows 11 requirements (TPM 2.0, Secure Boot, supported CPU). The upgrade script logs TPM and Secure Boot status but does not block on them, and it runs setup with `/compat ignorewarning`, so check eligibility first.
+- Devices must meet Windows 11 requirements (TPM 2.0, Secure Boot, supported CPU). The upgrade script checks the TPM (present, ready, version 2.0) and Secure Boot (enabled) before launching setup and stops with an error if either fails. It does not check the CPU, and setup runs with `/compat ignorewarning`, so verify CPU eligibility yourself. To bypass the TPM and Secure Boot checks, change the default in the script's `param` block to `[switch]$SkipHardwareChecks = $true`.
 - Each device needs at least 20 GB free on `C:`. The script fails early if it doesn't have that.
 - The ZIP is several GB. Test on one device before deploying widely.
 
@@ -27,6 +27,8 @@ Create a new package in PDQ Connect with two steps.
 | Attachments | `setup.zip` (use **Upload files**) |
 | Target folder | `C:\win_11_upgrade` |
 
+![File copy step in PDQ Connect](images/file-copy-step.png)
+
 This copies the ZIP to `C:\win_11_upgrade\` on the target device. That is the script's default working folder, so no edits are needed.
 
 ### Step 2: Script step
@@ -37,12 +39,15 @@ This copies the ZIP to `C:\win_11_upgrade\` on the target device. That is the sc
 | Type | PowerShell |
 | Script | Contents of `Win11Upgrade.ps1` (use **Import .ps1**) |
 
+![Script step in PDQ Connect](images/script-step.png)
+
 The script then:
 
 1. Checks it is running elevated.
 2. Checks that `setup.zip` exists in the working folder and that there is at least 20 GB free.
 3. Expands the ZIP into the working folder.
-4. Runs `setup.exe` silently with these flags: `/auto Upgrade /migratedrivers all /EULA accept /ShowOOBE none /dynamicupdate disable /quiet /compat ignorewarning /copylogs C:\Temp\Logs\WinSetup`.
+4. Checks the TPM (present, ready, 2.0) and Secure Boot (enabled), and stops if either fails.
+5. Runs `setup.exe` silently with these flags: `/auto Upgrade /migratedrivers all /EULA accept /ShowOOBE none /dynamicupdate disable /quiet /compat ignorewarning /copylogs C:\Temp\Logs\WinSetup`.
 
 **Reboot behavior:** the setup flags do not include `/noreboot`, so the device reboots on its own when setup is ready to continue. This is deliberate, because the reboot is a useful signal that the device is being upgraded. If you would rather control the timing, add `/noreboot` to the `$arguments` line in the script and schedule the reboot yourself.
 
@@ -83,5 +88,6 @@ Cleanup results are logged to `C:\temp\winupgradelogs\Win11Cleanup_<timestamp>.l
 
 - **`Expected zip file not found`**: the file copy step did not run or the ZIP name or folder does not match the script's `-ZipName` and `-WorkDir`.
 - **`setup.exe not found`**: the ZIP was made from the containing folder rather than its contents. Re-zip the files directly.
+- **`Hardware check failed` / `HardwareRequirementsNotMet`**: the device has no ready TPM 2.0 or Secure Boot is off. Check the log for which one, fix it in firmware settings, or bypass with `$SkipHardwareChecks = $true` if you know the device is fine.
 - **`Insufficient free space`**: free up at least 20 GB on `C:`.
 - **Cleanup says the machine is not on Windows 11**: the upgrade has not completed or failed. Check the setup logs in `C:\Temp\Logs\WinSetup` and `C:\Windows\Panther`.

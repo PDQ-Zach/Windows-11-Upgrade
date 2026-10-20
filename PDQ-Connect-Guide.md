@@ -44,9 +44,9 @@ This copies the ZIP to `C:\win_11_upgrade\` on the target device. That is the sc
 The script then:
 
 1. Checks it is running elevated.
-2. Checks that `setup.zip` exists in the working folder and that there is at least 20 GB free.
-3. Expands the ZIP into the working folder.
-4. Checks the TPM (present, ready, 2.0) and Secure Boot (enabled), and stops if either fails.
+2. Checks the TPM (present, ready, 2.0) and Secure Boot (enabled), and stops if either fails, before doing any other work.
+3. Checks that `setup.zip` exists in the working folder and that there is at least 20 GB free.
+4. Expands the ZIP into the working folder.
 5. Runs `setup.exe` silently with these flags: `/auto Upgrade /migratedrivers all /EULA accept /ShowOOBE none /dynamicupdate disable /quiet /compat ignorewarning /copylogs C:\Temp\Logs\WinSetup`.
 
 **Reboot behavior:** the setup flags do not include `/noreboot`, so the device reboots on its own when setup is ready to continue. This is deliberate, because the reboot is a useful signal that the device is being upgraded. If you would rather control the timing, add `/noreboot` to the `$arguments` line in the script and schedule the reboot yourself.

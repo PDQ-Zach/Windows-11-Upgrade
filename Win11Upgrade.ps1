@@ -152,6 +152,21 @@ try {
 
 	Assert-Elevated
 
+	# Run pre-upgrade hardware checks (OS build, TPM, Secure Boot) first so an ineligible
+	# device fails fast, before the ZIP is validated and expanded.
+	$hardwareProblems = @(Test-HardwareRequirements)
+	if ($hardwareProblems.Count -gt 0) {
+		foreach ($problem in $hardwareProblems) { Write-Log "Hardware check failed: $problem" "ERROR" }
+		if ($SkipHardwareChecks) {
+			Write-Log "-SkipHardwareChecks set - continuing despite failed hardware checks." "WARN"
+		} elseif ($DryRun) {
+			Write-Log "DryRun enabled - the upgrade would be blocked by the failed hardware checks above." "WARN"
+		} else {
+			Write-Log "Device does not meet Windows 11 requirements. Use -SkipHardwareChecks to override." "ERROR"
+			throw "HardwareRequirementsNotMet"
+		}
+	}
+
 	# Validate working directory and ZIP
 	Write-Log "Using working directory: $WorkDir"
 	if (-not (Test-Path -Path $WorkDir)) {
@@ -212,20 +227,6 @@ try {
 	New-Item -Path $copyLogsPath -ItemType Directory -Force | Out-Null
 
 	$arguments = "/auto Upgrade /migratedrivers all /EULA accept /ShowOOBE none /dynamicupdate disable /quiet /compat ignorewarning /copylogs `"$copyLogsPath`""
-
-	# Run pre-upgrade hardware checks: OS build, TPM, Secure Boot
-	$hardwareProblems = @(Test-HardwareRequirements)
-	if ($hardwareProblems.Count -gt 0) {
-		foreach ($problem in $hardwareProblems) { Write-Log "Hardware check failed: $problem" "ERROR" }
-		if ($SkipHardwareChecks) {
-			Write-Log "-SkipHardwareChecks set - continuing despite failed hardware checks." "WARN"
-		} elseif ($DryRun) {
-			Write-Log "DryRun enabled - the upgrade would be blocked by the failed hardware checks above." "WARN"
-		} else {
-			Write-Log "Device does not meet Windows 11 requirements. Use -SkipHardwareChecks to override." "ERROR"
-			throw "HardwareRequirementsNotMet"
-		}
-	}
 
 	if ($DryRun) {
 		Write-Log "DryRun enabled - would run: $setupExe $arguments"

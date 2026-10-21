@@ -1,8 +1,6 @@
 # Windows 11 Upgrade
 
-PowerShell helper repository containing a script to expand a prepared Windows 11 setup ZIP and run setup.exe with robust logging, validation and error handling.
-
-This repo was created from an existing local copy of `Win11Upgrade.ps1`.
+PowerShell scripts to upgrade devices to Windows 11 and clean up afterwards: `Win11Upgrade.ps1` expands a prepared Windows 11 setup ZIP and runs setup.exe with logging, validation and error handling, and `Win11Cleanup.ps1` removes the leftover files once the upgrade has finished. See `PDQ-Connect-Guide.md` for deploying them with PDQ Connect.
 
 ## Contents
 
@@ -46,7 +44,18 @@ It refuses to run unless the machine is on Windows 11 (build 22000+), so a faile
 
 Exit codes: `0` success, `1` error or not on Windows 11, `2` some items could not be removed. Logs go to `C:\temp\winupgradelogs`.
 
-## Notes
+## Disclaimer
 
-- This repository contains a script intended to run on Windows; it was created locally and is not (yet) pushed to a remote.
-- If you want a private GitHub repo created and pushed, tell me and I'll create it (requires GitHub CLI `gh` signed in or a token).
+These scripts start an in-place Windows 11 upgrade and can delete folders (including, optionally, `C:\Windows.old`). They are provided as-is, without warranty (see `LICENSE`).
+
+- Test on a pilot device first, using `-DryRun` before a real run.
+- The upgrade runs setup with `/compat ignorewarning`, so compatibility warnings will not stop it. Check application and driver compatibility, and back up important data, before deploying widely.
+- The scripts check the TPM and Secure Boot but not the CPU. Confirm CPU eligibility yourself.
+
+## Tests
+
+`tests/Run-Tests.ps1` runs smoke tests for both scripts (no real upgrade is performed). They run automatically on GitHub Actions on every push and pull request, and can be run locally on a Windows machine from an elevated PowerShell:
+
+```powershell
+.\tests\Run-Tests.ps1
+```

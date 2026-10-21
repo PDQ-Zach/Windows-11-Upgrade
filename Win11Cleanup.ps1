@@ -179,6 +179,11 @@ try {
 	}
 
 	if ($DryRun) {
+		# A refused (protected) path is a configuration error worth surfacing even in a dry run
+		if ($failures -gt 0) {
+			Write-Log "Dry run found $failures item(s) that would not be removed." "WARN"
+			exit 2
+		}
 		Write-Log "Finished (dry run)."
 		exit 0
 	}

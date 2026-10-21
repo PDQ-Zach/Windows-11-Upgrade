@@ -67,8 +67,9 @@ function Test-FreeSpace {
 		[int64]$RequiredBytes
 	)
 	try {
-		$drive = Get-PSDrive -Name ([System.IO.Path]::GetPathRoot($Path).TrimEnd('\')) -ErrorAction Stop
-		return $drive.Free -ge $RequiredBytes
+		# DriveInfo takes the drive root ("C:\") directly; Get-PSDrive wants just the letter ("C")
+		$drive = New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot($Path))
+		return $drive.AvailableFreeSpace -ge $RequiredBytes
 	} catch {
 		Write-Log ("Unable to determine free disk space on {0}: {1}" -f $Path, $_) "WARN"
 		return $false

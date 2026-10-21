@@ -1,0 +1,21 @@
+name: Test scripts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # powershell = Windows PowerShell 5.1 (what endpoints run), pwsh = PowerShell 7
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        shell: ${{ matrix.shell }}
+        run: ./tests/Run-Tests.ps1

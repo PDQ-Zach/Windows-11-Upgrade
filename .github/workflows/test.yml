@@ -9,13 +9,15 @@ jobs:
   test:
     runs-on: windows-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        # powershell = Windows PowerShell 5.1 (what endpoints run), pwsh = PowerShell 7
-        shell: [powershell, pwsh]
     steps:
       - uses: actions/checkout@v4
-      - name: Run tests
-        shell: ${{ matrix.shell }}
+
+      # Windows PowerShell 5.1 is what endpoints run
+      - name: Run tests (Windows PowerShell 5.1)
+        shell: powershell
+        run: ./tests/Run-Tests.ps1
+
+      - name: Run tests (PowerShell 7)
+        if: ${{ !cancelled() }}
+        shell: pwsh
         run: ./tests/Run-Tests.ps1
